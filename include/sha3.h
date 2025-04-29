@@ -178,45 +178,6 @@ int sha3_hash_parallel(sha3_hash_type type,
                        const void *data,
                        void *output,
                        size_t n);
-#ifdef __GNUC__
-/**
- * @brief Specialized AVX2-optimized SHA3-256 for 64-byte input batches
- * @param data Pointer to 64-byte input
- * @param len Input length (must be 64)
- * @param digest Pointer to output buffer
- * @param digest_size Size of digest buffer (>= SHA3_256_DIGEST_SIZE)
- * @return Number of bytes written to digest on success, -1 on error
- */
-int sha3_hash_256_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
-/**
- * @brief AVX2 4-way SHA3-512 for 64-byte inputs (specialized hot path)
- */
-int sha3_hash_512_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
-#endif
-//# AVX-512F specialized path for 64B SHA3-256
-#ifdef __GNUC__
-/**
- * @brief Specialized AVX-512F single-state SHA3-256 for 64-byte input batches
- * @param data Pointer to 64-byte input
- * @param len Input length (must be 64)
- * @param digest Pointer to output buffer
- * @param digest_size Size of digest buffer (>= SHA3_256_DIGEST_SIZE)
- * @return Number of bytes written to digest on success, -1 on error
- */
-int sha3_hash_256_64B_avx512(const void *data, size_t len, void *digest, size_t digest_size);
-/**
- * @brief AVX-512F single-state SHA3-512 for 64-byte inputs
- */
-int sha3_hash_512_64B_avx512(const void *data, size_t len, void *digest, size_t digest_size);
-/**
- * @brief AVX-512F 8-way SHA3-256 for 64-byte input batches (times-8 kernel)
- */
-int sha3_hash_256_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
-/**
- * @brief AVX-512F 8-way SHA3-512 for 64-byte inputs (times-8 SIMD512)
- */
-int sha3_hash_512_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
-#endif
 
 /*
  * HashFunction interface for pluggable hash functions

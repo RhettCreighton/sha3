@@ -154,21 +154,6 @@ int sha3_hash(sha3_hash_type type, const void *data, size_t len, void *digest, s
     /* Specialized AVX2 path for 64-byte SHA3-256 */
     /* Specialized AVX2 and AVX-512 paths for 64-byte SHA3-256 */
     /* Specialized AVX-512 and AVX2 paths for 64-byte SHA3-256 */
-#ifdef __GNUC__
-    /* Fast path: for single-block (64-byte) input, dispatch to optimized kernels
-     * based on detected CPU features: AVX-512F > AVX2 > portable C implementation.
-     */
-    if (len == 64) {
-        if (type == SHA3_256 && digest_size >= SHA3_256_DIGEST_SIZE) {
-            if (_sha3_cpu_has_avx512f()) return sha3_hash_256_64B_avx512(data, len, digest, digest_size);
-            if (_sha3_cpu_has_avx2())   return sha3_hash_256_64B_avx2(data, len, digest, digest_size);
-        }
-        if (type == SHA3_512 && digest_size >= SHA3_512_DIGEST_SIZE) {
-            if (_sha3_cpu_has_avx512f()) return sha3_hash_512_64B_avx512(data, len, digest, digest_size);
-            if (_sha3_cpu_has_avx2())   return sha3_hash_512_64B_avx2(data, len, digest, digest_size);
-        }
-    }
-#endif
     /* Initialize context */
     if (sha3_init(&ctx, type) != 0) {
         return -1;

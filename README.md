@@ -198,58 +198,6 @@ To enable compile-time flags, for example with CMake:
 cmake -DCMAKE_C_FLAGS="-mavx2 -mavx512f -O3 -march=native" -DCMAKE_BUILD_TYPE=Release ..
 ```
 
-## Using the Optimized API in Your Application
-
-### One-Shot Hashing with Runtime Dispatch
-
-Build and link with AVX2/AVX-512F support to enable runtime CPU feature detection. Then simply call:
-```c
-#include "sha3.h"
-
-uint8_t digest[SHA3_256_DIGEST_SIZE];
-// data_len may be any length; if data_len == 64, auto-dispatch uses best single-state kernel
-sha3_hash(SHA3_256, data, data_len, digest, SHA3_256_DIGEST_SIZE);
-```
-
-### Direct Calls to Specialized Kernels
-
-For maximum per-core throughput when hashing fixed 64-byte blocks, use the 8-way AVX-512F kernel:
-```c
-#include "sha3.h"
-
-uint8_t digest[SHA3_256_DIGEST_SIZE];
-// Processes 8 hashes in parallel on one core (returns digest of lane 0)
-sha3_hash_256_64B_avx512_times8(block64, 64, digest, SHA3_256_DIGEST_SIZE);
-```
-
-### Multithreading for Full CPU Utilization
-
-Spawn one thread per core, each looping over the one-shot API to fully saturate the CPU:
-```c
-#include <unistd.h>  // for sysconf
-#include <pthread.h>
-#include "sha3.h"
-
-void* worker(void* _) {
-    uint8_t block[64] = { /* your 64-byte message */ };
-    uint8_t digest[SHA3_256_DIGEST_SIZE];
-    while (1) {
-        sha3_hash(SHA3_256, block, 64, digest, SHA3_256_DIGEST_SIZE);
-    }
-    return NULL;
-}
-
-int main() {
-    int n = sysconf(_SC_NPROCESSORS_ONLN);
-    pthread_t threads[n];
-    for (int i = 0; i < n; i++) {
-        pthread_create(&threads[i], NULL, worker, NULL);
-    }
-    pthread_join(threads[0], NULL);
-    return 0;
-}
-```
-
 ## Integration
 
 You can integrate this library into your own CMake-based project in a reproducible way by pinning to a specific tag or commit SHA. Choose one of the following methods:
