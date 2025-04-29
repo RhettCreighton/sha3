@@ -87,9 +87,22 @@ int main() {
 
 After building, example executables are available in `build/bin/`:
 
-- `sha3_hash_example` — One-shot SHA3-256 (and SHA3-512) hashing.
-- `sha3_shake_example` — SHAKE128/256 extendable-output demonstration.
-- `sha3_benchmark` — Micro-benchmark tool for single-threaded throughput.
+ - `sha3_hash_example`             — One-shot SHA3-256 (and SHA3-512) hashing.
+ - `sha3_shake_example`            — SHAKE128/256 extendable-output demonstration.
+ - `sha3_benchmark`               — Micro-benchmark tool for single-threaded throughput.
+ - `sha3_parallel_benchmark`      — Parallel distinct 64B hashing across all cores.
+
+### Parallel Distinct-Block Benchmark
+
+To hash *distinct* 64-byte messages in parallel:
+```bash
+./bin/sha3_parallel_benchmark
+```
+This demo uses the public API:
+```c
+sha3_hash_parallel(SHA3_256, in, out, n);
+```
+which dispatches to the AVX-512F 8-way multi-buffer kernel when available.
 
 Run an example:
 

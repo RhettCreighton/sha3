@@ -23,6 +23,7 @@ set(SHA3_SOURCES
     src/sha3.c
     src/sha3_avx2.c
     src/sha3_avx512_single.c
+    src/sha3_parallel.c
     third_party/KeccakCodePackage/lib/low/KeccakP-1600/AVX512/C/KeccakP-1600-AVX512.c
     src/sha3_avx512_times8.c
     third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512/KeccakP-1600-times8-SIMD512.c
@@ -33,8 +34,10 @@ set(SHA3_SOURCES
     src/hash_function.c
 )
 
-# Create library (static by default)
+## Create library (static by default)
 add_library(sha3 ${SHA3_SOURCES})
+## Link threads for parallel hashing
+target_link_libraries(sha3 PUBLIC Threads::Threads)
   # Suppress GCC unused-variable errors in third-party Keccak code
   set_source_files_properties(
     third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512/KeccakP-1600-times8-SIMD512.c
@@ -129,17 +132,20 @@ if(SHA3_BUILD_EXAMPLES)
     add_executable(sha3_shake_example examples/shake_example.c)
     target_link_libraries(sha3_shake_example sha3)
 
-    # Benchmark example: measure SHA3-256 hashes per second
+    # Benchmark example: measure SHA3-256 hashes per second (single-threaded)
     add_executable(sha3_benchmark examples/sha3_benchmark.c)
     target_link_libraries(sha3_benchmark PRIVATE sha3 Threads::Threads)
-    # Build examples with same performance flags as library
+    # Build examples with performance flags
     target_compile_options(sha3_benchmark PRIVATE -O3 -march=native -funroll-loops)
+    
+    # Parallel benchmark: measure throughput of sha3_hash_parallel across threads
+    add_executable(sha3_parallel_benchmark examples/sha3_parallel_benchmark.c)
+    target_link_libraries(sha3_parallel_benchmark PRIVATE sha3 Threads::Threads)
+    target_compile_options(sha3_parallel_benchmark PRIVATE -O3 -march=native -funroll-loops)
 
-    # Copy executables to bin/
     set_target_properties(
-        sha3_hash_example sha3_shake_example sha3_benchmark
-        PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+        sha3_hash_example sha3_shake_example sha3_benchmark sha3_parallel_benchmark
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
     # Enable link-time optimization for examples
     set_target_properties(

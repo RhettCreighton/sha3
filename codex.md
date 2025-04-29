@@ -35,7 +35,22 @@ Verify examples compile and run:
 ./bin/sha3_hash_example
 ./bin/sha3_shake_example
 ./bin/sha3_benchmark
+``` 
+
+## Parallel 64-byte Hashing Example
+
+After building, run the parallel distinct-64-byte benchmark:
+```bash
+./bin/sha3_parallel_benchmark
 ```
+This uses the public API:
+```c
+// data: pointer to n×64-byte messages
+// out : pointer to n×digest_size bytes
+// n   : number of messages
+sha3_hash_parallel(SHA3_256, data, out, n);
+```
+Compile with `-mavx512f -O3 -march=native -pthread` to enable the AVX-512F 8-way kernel and threading.
 
 ## Example: Using the Optimized API in Your Application
 

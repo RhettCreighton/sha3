@@ -147,7 +147,37 @@ const char* sha3_version(void);
  * @return Number of bytes written to output on success, -1 on error
  */
 int shake_xof(sha3_hash_type type, const void *data, size_t len, void *output, size_t output_len);
-
+/**
+ * @brief Compute multiple SHA3 hashes in parallel across all CPU cores.
+ *
+ * Processes 'n' messages of equal length 'len', storing n digests in the output buffer.
+ * Auto-detects CPU features and uses vectorized multi-buffer kernels for len == 64 bytes
+ * (SHA3_256 or SHA3_512) with AVX-512F (8-way) or AVX2 (4-way), falling back to single-state
+ * optimized or generic paths. Spawns one thread per core for maximum throughput.
+ *
+ * @param type   Hash algorithm (e.g., SHA3_256 or SHA3_512).
+ * @param data   Pointer to input buffer containing n messages, each 'len' bytes.
+ * @param len    Length of each message in bytes (must be 64 for vectorized fast paths).
+ * @param output Pointer to output buffer of size n * sha3_get_digest_size(type) bytes.
+ * @param n      Number of messages to process.
+ * @return 0 on success, -1 on error (invalid parameters or memory issues).
+ */
+/**
+ * @brief Compute multiple SHA3 hashes in parallel for fixed-length (64-byte) messages.
+ *
+ * Spawns one thread per core, auto-detects ISA, and uses 8-way AVX-512F or 4-way AVX2
+ * multi-buffer kernels for maximum throughput on 64-byte inputs (SHA3_256 or SHA3_512).
+ *
+ * @param type   Hash algorithm (SHA3_256 or SHA3_512).
+ * @param data   Input buffer (n × 64 bytes).
+ * @param output Output buffer (n × sha3_get_digest_size(type) bytes).
+ * @param n      Number of messages to process.
+ * @return 0 on success, -1 on error (invalid parameters or memory issues).
+ */
+int sha3_hash_parallel(sha3_hash_type type,
+                       const void *data,
+                       void *output,
+                       size_t n);
 #ifdef __GNUC__
 /**
  * @brief Specialized AVX2-optimized SHA3-256 for 64-byte input batches
