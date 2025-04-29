@@ -37,6 +37,61 @@ Verify examples compile and run:
 ./bin/sha3_benchmark
 ```
 
+## Example: Using the Optimized API in Your Application
+
+Compile your application with `-mavx2 -mavx512f -O3 -march=native` to enable vectorized kernels.
+
+```c
+#include "sha3.h"
+
+// One-shot hashing (runtime dispatch picks best kernel for 64-byte inputs)
+uint8_t digest[SHA3_256_DIGEST_SIZE];
+sha3_hash(SHA3_256, data, data_len, digest, SHA3_256_DIGEST_SIZE);
+
+// Direct 8-way AVX-512F for fixed 64-byte blocks (max per-core throughput)
+sha3_hash_256_64B_avx512_times8(block64, 64, digest, SHA3_256_DIGEST_SIZE);
+```
+
+To fully utilize all CPU cores, spawn multiple threads, each looping over `sha3_hash`:
+#include <unistd.h>  // for sysconf
+#include <pthread.h>
+#include "sha3.h"
+
+void* worker(void* _) {
+    uint8_t block[64]; /* your 64-byte message */
+    uint8_t digest[SHA3_256_DIGEST_SIZE];
+    while (1) {
+        sha3_hash(SHA3_256, block, 64, digest, SHA3_256_DIGEST_SIZE);
+    }
+    return NULL;
+}
+
+int main() {
+    int n = sysconf(_SC_NPROCESSORS_ONLN);
+    pthread_t threads[n];
+    for (int i = 0; i < n; i++) {
+        pthread_create(&threads[i], NULL, worker, NULL);
+    }
+    pthread_join(threads[0], NULL);
+    return 0;
+}
+```
+
+## Benchmarking Performance
+
+To measure maximum multicore AVX-512F 8-way SHA3-256 throughput (≈170 MH/s on a 16-core AVX-512F CPU), run:
+```bash
+n=$(nproc)
+for i in $(seq 1 $n); do
+  ./bin/sha3_benchmark > bench$i.log 2>&1 &
+done
+wait
+grep -A2 'AVX-512F 8-way SHA3-256 Benchmark - 1 second test' bench*.log \
+  | grep 'Hash rate' \
+  | awk -F':' '{sum+=$2} END {printf "Aggregate AVX-512F 8-way SHA3-256 throughput: %.0f hashes/sec (%.1f MH/s)\n", sum, sum/1e6}'
+rm bench*.log
+```
+
 ## Integration Patterns
 - **CMake Submodule**:
   ```cmake
