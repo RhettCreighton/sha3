@@ -1,4 +1,5 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2025 Rhett Creighton */
 /*
  * @file sha3_parallel.c
  * @brief Parallel SHA3 hashing across multiple threads

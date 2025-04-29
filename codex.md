@@ -23,6 +23,9 @@ This file provides essential context and coding guidelines for AI assistants wor
 - Follow existing indentation and brace style (spaces, 4-column indent)
 
 ## Build & Test Workflow
+
+All CMake builds should be performed in a single out-of-source build directory (e.g., `build/`). Avoid creating additional build directories with other names (like `build_parallel/`) to keep the workspace tidy. To remove all build artifacts, simply delete the build directory: `rm -rf build/`.
+
 ```bash
 mkdir -p build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
