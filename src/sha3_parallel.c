@@ -14,6 +14,11 @@
 #ifdef __GNUC__
 #include "KeccakP-1600-times8-SnP.h"
 #endif
+/* Declarations for specialized one-shot 64-byte hash functions */
+extern int sha3_hash_256_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
+extern int sha3_hash_256_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
+extern int sha3_hash_512_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
+extern int sha3_hash_512_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
 
 typedef struct {
     sha3_hash_type type;

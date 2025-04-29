@@ -94,7 +94,7 @@ After building, example executables are available in `build/bin/`:
 
 ### Parallel Distinct-Block Benchmark
 
-To hash *distinct* 64-byte messages in parallel:
+To hash *distinct* 64-byte messages in parallel using all cores:
 ```bash
 ./bin/sha3_parallel_benchmark
 ```
@@ -103,6 +103,20 @@ This demo uses the public API:
 sha3_hash_parallel(SHA3_256, in, out, n);
 ```
 which dispatches to the AVX-512F 8-way multi-buffer kernel when available.
+
+### Quick One-Line Parallel Benchmark
+
+For the fastest way to build and run a 1 000 000-message parallel SHA3-256 benchmark, execute:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DSHA3_BUILD_EXAMPLES=ON .. \
+  && cmake --build build -- -j$(nproc) \
+  && build/bin/sha3_parallel_benchmark 1000000
+```
+This will compile with `-O3 -march=native -funroll-loops` (enabling AVX2/AVX-512 where supported) and output results like:
+```
+sha3_hash_parallel: 1000000 messages of 64 bytes in 0.008 s
+Throughput: 117844136 msgs/s (7192.6 MiB/s) on 16 threads
+```
 
 Run an example:
 
