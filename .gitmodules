@@ -1,0 +1,3 @@
+[submodule "vendor/XKCP"]
+	path = vendor/XKCP
+	url = https://github.com/XKCP/XKCP.git

@@ -178,6 +178,64 @@ int sha3_hash_parallel(sha3_hash_type type,
                        const void *data,
                        void *output,
                        size_t n);
+/**
+ * @brief Compute multiple SHA3 hashes in parallel for equal-length messages.
+ *
+ * This function processes n messages of identical length len (len <= block size)
+ * in parallel, auto-detecting CPU features for optimal throughput. For any
+ * len < block size, padding (domain suffix and final bit) is applied on-the-fly
+ * inside the vectorized 8-way AVX-512 kernel (or AVX2 fallback).
+ *
+ * @param type      Hash algorithm (e.g., SHA3_256).
+ * @param data      Input buffer of n messages, each of length len bytes.
+ * @param len       Length of each message in bytes (must be <= sha3_get_block_size(type)).
+ * @param output    Output buffer, n × sha3_get_digest_size(type) bytes.
+ * @param n         Number of messages.
+ * @return 0 on success, -1 on error.
+ */
+int sha3_hash_parallel_len(sha3_hash_type type,
+                           const void *data,
+                           size_t len,
+                           void *output,
+                           size_t n);
+/**
+ * @brief Parallel hash of equal-length messages with auto-padding.
+ *
+ * Hashes n messages of length msg_len bytes in parallel, automatically
+ * applying SHA-3 padding (0x06 suffix, zeros, 0x80 final bit) if msg_len
+ * < block size. Internally uses the padded-block multi-buffer kernels.
+ *
+ * @param type    Hash algorithm (e.g., SHA3_256)
+ * @param data    Input buffer containing n×msg_len bytes
+ * @param msg_len Length of each raw message in bytes (<= block size)
+ * @param output  Output buffer of n×sha3_get_digest_size(type) bytes
+ * @param n       Number of messages
+ * @return 0 on success, -1 on error
+ */
+int sha3_hash_parallel_eqlen(sha3_hash_type type,
+                             const void *data,
+                             size_t msg_len,
+                             void *output,
+                             size_t n);
+/**
+ * @brief Parallel hash of equal-length messages with auto-padding.
+ *
+ * Hashes n messages of length msg_len bytes (msg_len <= block size) in parallel.
+ * Messages are padded according to the SHA-3 spec in one pass, then
+ * the padded blocks are fed into the vectorized multi-buffer kernels.
+ *
+ * @param type    Hash algorithm (e.g., SHA3_256)
+ * @param data    Input buffer containing n × msg_len bytes
+ * @param msg_len Length of each message in bytes
+ * @param output  Output buffer of n × sha3_get_digest_size(type) bytes
+ * @param n       Number of messages
+ * @return 0 on success, non-zero on error
+ */
+int sha3_hash_parallel_eqlen(sha3_hash_type type,
+                             const void *data,
+                             size_t msg_len,
+                             void *output,
+                             size_t n);
 
 /*
  * HashFunction interface for pluggable hash functions

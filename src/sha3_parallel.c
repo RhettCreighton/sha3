@@ -1,4 +1,7 @@
 /* SPDX-License-Identifier: Apache-2.0 */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 /* Copyright (c) 2025 Rhett Creighton */
 /*
  * @file sha3_parallel.c
@@ -9,12 +12,25 @@
 #include <stdint.h>
 #include <string.h>
 #include <pthread.h>
+#include <sched.h>
 #include <unistd.h>
 #include "sha3.h"
+#ifdef __GNUC__
+#include "KeccakP-1600-times8-SnP.h"
+#endif
 // For multi-buffer AVX-512 8-way sponge (disabled due to missing third-party code)
 // #ifdef __GNUC__
 // #include "KeccakP-1600-times8-SnP.h"
 // #endif
+// Internal Keccak sponge API (to absorb pre-padded blocks)
+extern int keccak_init(uint64_t state[25]);
+extern void keccak_absorb(uint64_t *state, const uint8_t *data, size_t len, size_t rate);
+extern void keccak_squeeze(uint64_t *state, uint8_t *output, size_t output_len, size_t rate);
+// AVX-512×8 Keccak-f[1600] permutation
+#ifdef __GNUC__
+extern void keccak_permutation8_avx512(uint64_t *s0, uint64_t *s1, uint64_t *s2, uint64_t *s3,
+                                       uint64_t *s4, uint64_t *s5, uint64_t *s6, uint64_t *s7);
+#endif
 /* Declarations for specialized one-shot 64-byte hash functions */
 extern int sha3_hash_256_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
 extern int sha3_hash_256_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
@@ -29,6 +45,8 @@ typedef struct {
     size_t digest_size;
     size_t start;
     size_t end;
+    int have_avx512;
+    int have_avx2;
 } sha3_parallel_arg;
 
 static void *sha3_parallel_thread(void *arg) {
@@ -39,17 +57,75 @@ static void *sha3_parallel_thread(void *arg) {
     size_t digest = a->digest_size;
     size_t start = a->start;
     size_t end = a->end;
-/* Prefetch distance in blocks to hide memory latency */
-#define PF_DIST 32
-#ifdef __GNUC__
-    int have_avx512 = __builtin_cpu_supports("avx512f");
-    int have_avx2   = __builtin_cpu_supports("avx2");
-#else
-    int have_avx512 = 0;
-    int have_avx2   = 0;
-#endif
+    /* Prefetch distance in blocks to hide memory latency (tunable) */
+    #define PF_DIST 64
+    /* CPU feature flags (inherited from parent) */
+    int have_avx512 = a->have_avx512;
+    int have_avx2   = a->have_avx2;
+    /* Pre-padded 8-way AVX-512 path: use XKCP full-unroll kernel */
+    if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512) &&
+        ((len == SHA3_256_BLOCK_SIZE && a->type == SHA3_256) ||
+         (len == SHA3_512_BLOCK_SIZE && a->type == SHA3_512))) {
+        size_t BS = (a->type == SHA3_256 ? SHA3_256_BLOCK_SIZE : SHA3_512_BLOCK_SIZE);
+        size_t DIG = digest;
+        size_t i = start;
+        while (i + 8 <= end) {
+            if (i + PF_DIST < end) __builtin_prefetch(data + (i + PF_DIST) * BS, 0, 3);
+            KeccakP1600times8_SIMD512_states st;
+            for (unsigned lane = 0; lane < 8; ++lane) {
+                KeccakP1600times8_OverwriteBytes(&st, lane,
+                    data + (i + lane) * BS, 0, BS);
+            }
+            KeccakP1600times8_PermuteAll_24rounds(&st);
+            for (unsigned lane = 0; lane < 8; ++lane) {
+                KeccakP1600times8_ExtractBytes(&st, lane,
+                    output + (i + lane) * DIG, 0, DIG);
+            }
+            i += 8;
+        }
+        /* Leftover messages fall back to scalar sponge */
+        for (; i < end; ++i) {
+            uint64_t st[25];
+            keccak_init(st);
+            keccak_absorb(st, data + i * BS, BS, BS);
+            keccak_squeeze(st, output + i * DIG, DIG, BS);
+        }
+        return NULL;
+    }
+    /* Fast multi-buffer 8-way path for arbitrary equal-length messages (len < block size) */
+    if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512)) {
+        size_t BS = (a->type == SHA3_256 ? SHA3_256_BLOCK_SIZE : SHA3_512_BLOCK_SIZE);
+        if (len > 0 && len < BS) {
+            size_t DIG = digest;
+            size_t i = start;
+            while (i + 8 <= end) {
+                KeccakP1600times8_SIMD512_states st;
+                KeccakP1600times8_InitializeAll(&st);
+                for (unsigned lane = 0; lane < 8; ++lane) {
+                    const uint8_t *src = data + (i + lane) * len;
+                    KeccakP1600times8_OverwriteBytes(&st, lane, src, 0, (unsigned)len);
+                    KeccakP1600times8_OverwriteBytes(&st, lane, (const unsigned char[]){0x06}, (unsigned)len, 1);
+                    /* zero padding between suffix and final bit */
+                    KeccakP1600times8_OverwriteWithZeroes(&st, lane, (unsigned)(len + 1));
+                    /* domain bit */
+                    KeccakP1600times8_OverwriteBytes(&st, lane, (const unsigned char[]){0x80}, (unsigned)(BS - 1), 1);
+                }
+                KeccakP1600times8_PermuteAll_24rounds(&st);
+                for (unsigned lane = 0; lane < 8; ++lane) {
+                    uint8_t *dst = output + (i + lane) * DIG;
+                    KeccakP1600times8_ExtractBytes(&st, lane, dst, 0, (unsigned)DIG);
+                }
+                i += 8;
+            }
+            for (; i < end; ++i) {
+                const uint8_t *src = data + i * len;
+                uint8_t *dst = output + i * digest;
+                sha3_hash(a->type, src, len, dst, digest);
+            }
+            return NULL;
+        }
+    }
     /* Fast multi-buffer 8-way path for 64-byte messages with AVX-512 */
-#ifdef __GNUC__
     if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512) && len == 64) {
         size_t BS = (a->type == SHA3_256 ? SHA3_256_BLOCK_SIZE : SHA3_512_BLOCK_SIZE);
         size_t i = start;
@@ -80,7 +156,6 @@ static void *sha3_parallel_thread(void *arg) {
                 s0[k] = lanes0[k]; s1[k] = lanes1[k]; s2[k] = lanes2[k]; s3[k] = lanes3[k];
                 s4[k] = lanes4[k]; s5[k] = lanes5[k]; s6[k] = lanes6[k]; s7[k] = lanes7[k];
             }
-            extern void keccak_permutation8_avx512(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
             keccak_permutation8_avx512(s0, s1, s2, s3, s4, s5, s6, s7);
             uint8_t *dst = output + i * digest;
             uint64_t *out0 = (uint64_t *)(dst + 0 * digest);
@@ -104,7 +179,6 @@ static void *sha3_parallel_thread(void *arg) {
         }
         return NULL;
     }
-#endif
     /* Fast multi-buffer 4-way path for 64-byte messages with AVX2 */
     if (have_avx2 && (a->type == SHA3_256 || a->type == SHA3_512) && len == 64) {
 #ifdef __GNUC__
@@ -182,6 +256,15 @@ int sha3_hash_parallel_len(sha3_hash_type type,
     if (n == 0) return 0;
     size_t digest_size = sha3_get_digest_size(type);
     if (digest_size == 0) return -1;
+    /* Confirm len matches block size for vector kernels */
+    size_t BS = sha3_get_block_size(type);
+    if (len != BS) return -1;
+    /* Detect CPU features once */
+    int have_avx512 = 0, have_avx2 = 0;
+    #ifdef __GNUC__
+        have_avx512 = __builtin_cpu_supports("avx512f");
+        have_avx2   = __builtin_cpu_supports("avx2");
+    #endif
     /* Determine number of threads */
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
     int nthreads = (nproc > 0 ? (int)nproc : 1);
@@ -202,19 +285,36 @@ int sha3_hash_parallel_len(sha3_hash_type type,
     for (int t = 0; t < nthreads; ++t) {
         size_t count = base + (t < (int)rem ? 1 : 0);
         args[t].type = type;
+        /* propagate CPU feature flags into thread args */
+        args[t].have_avx512 = have_avx512;
+        args[t].have_avx2   = have_avx2;
         args[t].data = (const uint8_t *)data;
         args[t].output = (uint8_t *)output;
         args[t].len = len;
         args[t].digest_size = digest_size;
         args[t].start = offset;
+        /* propagate CPU feature flags into thread args */
+        args[t].have_avx512 = have_avx512;
+        args[t].have_avx2   = have_avx2;
         args[t].end = offset + count;
         offset += count;
-        if (pthread_create(&threads[t], NULL, sha3_parallel_thread, &args[t]) != 0) {
-            /* Cleanup on failure */
-            for (int j = 0; j < t; ++j) pthread_join(threads[j], NULL);
-            free(args);
-            free(threads);
-            return -1;
+        {
+            pthread_attr_t attr;
+            cpu_set_t cpuset;
+            pthread_attr_init(&attr);
+            CPU_ZERO(&cpuset);
+            /* pin thread t to core t */
+            CPU_SET(t, &cpuset);
+            pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+            if (pthread_create(&threads[t], &attr, sha3_parallel_thread, &args[t]) != 0) {
+                pthread_attr_destroy(&attr);
+                /* Cleanup on failure */
+                for (int j = 0; j < t; ++j) pthread_join(threads[j], NULL);
+                free(args);
+                free(threads);
+                return -1;
+            }
+            pthread_attr_destroy(&attr);
         }
     }
 
@@ -225,6 +325,40 @@ int sha3_hash_parallel_len(sha3_hash_type type,
     free(args);
     free(threads);
     return 0;
+}
+
+/**
+ * @brief Parallel hash for equal-length messages with auto-padding.
+ */
+int sha3_hash_parallel_eqlen(sha3_hash_type type,
+                             const void *data,
+                             size_t msg_len,
+                             void *output,
+                             size_t n) {
+    if (!data || !output) return -1;
+    if (n == 0) return 0;
+    size_t BS = sha3_get_block_size(type);
+    if (msg_len > BS) return -1;
+    /* If already block-sized, dispatch directly */
+    if (msg_len == BS) {
+        return sha3_hash_parallel_len(type, data, BS, output, n);
+    }
+    /* Pad all messages into a contiguous BS-byte buffer */
+    uint8_t *padded;
+    if (posix_memalign((void **)&padded, 64, n * BS) != 0) {
+        return -1;
+    }
+    for (size_t i = 0; i < n; i++) {
+        uint8_t *dst = padded + i * BS;
+        const uint8_t *src = (const uint8_t *)data + i * msg_len;
+        memcpy(dst, src, msg_len);
+        dst[msg_len] = 0x06;
+        memset(dst + msg_len + 1, 0, BS - (msg_len + 1));
+        dst[BS - 1] ^= 0x80;
+    }
+    int rc = sha3_hash_parallel_len(type, padded, BS, output, n);
+    free(padded);
+    return rc;
 }
 /**
  * @brief Compute multiple SHA3 hashes in parallel for fixed-length (64-byte) messages.
