@@ -11,10 +11,10 @@
 #include <pthread.h>
 #include <unistd.h>
 #include "sha3.h"
-// For multi-buffer AVX-512 8-way sponge
-#ifdef __GNUC__
-#include "KeccakP-1600-times8-SnP.h"
-#endif
+// For multi-buffer AVX-512 8-way sponge (disabled due to missing third-party code)
+// #ifdef __GNUC__
+// #include "KeccakP-1600-times8-SnP.h"
+// #endif
 /* Declarations for specialized one-shot 64-byte hash functions */
 extern int sha3_hash_256_64B_avx512_times8(const void *data, size_t len, void *digest, size_t digest_size);
 extern int sha3_hash_256_64B_avx2(const void *data, size_t len, void *digest, size_t digest_size);
@@ -49,42 +49,62 @@ static void *sha3_parallel_thread(void *arg) {
     int have_avx2   = 0;
 #endif
     /* Fast multi-buffer 8-way path for 64-byte messages with AVX-512 */
-    if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512) && len == 64) {
 #ifdef __GNUC__
+    if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512) && len == 64) {
         size_t BS = (a->type == SHA3_256 ? SHA3_256_BLOCK_SIZE : SHA3_512_BLOCK_SIZE);
-        KeccakP1600times8_SIMD512_states states;
-        uint8_t buf[8][SHA3_MAX_BLOCK_SIZE];
         size_t i = start;
         while (i + 8 <= end) {
-            /* Prefetch block PF_DIST ahead */
             if (i + PF_DIST < end) __builtin_prefetch(data + (i + PF_DIST) * len, 0, 3);
+            uint8_t buf0[SHA3_MAX_BLOCK_SIZE], buf1[SHA3_MAX_BLOCK_SIZE], buf2[SHA3_MAX_BLOCK_SIZE], buf3[SHA3_MAX_BLOCK_SIZE];
+            uint8_t buf4[SHA3_MAX_BLOCK_SIZE], buf5[SHA3_MAX_BLOCK_SIZE], buf6[SHA3_MAX_BLOCK_SIZE], buf7[SHA3_MAX_BLOCK_SIZE];
+            uint64_t s0[25] = {0}, s1[25] = {0}, s2[25] = {0}, s3[25] = {0};
+            uint64_t s4[25] = {0}, s5[25] = {0}, s6[25] = {0}, s7[25] = {0};
+            const uint8_t *src = data + i * len;
+            uint8_t *bufs[8] = {buf0, buf1, buf2, buf3, buf4, buf5, buf6, buf7};
             for (int j = 0; j < 8; ++j) {
-                uint8_t *b = buf[j];
-                /* pad message j */
-                memcpy(b, data + (i+j)*len, len);
+                uint8_t *b = bufs[j];
+                memcpy(b, src + j * len, len);
                 b[len] = 0x06;
                 memset(b + len + 1, 0, BS - (len + 1));
                 b[BS - 1] ^= 0x80;
-                KeccakP1600times8_OverwriteBytes(&states, j, b, 0, BS);
             }
-            KeccakP1600times8_PermuteAll_24rounds(&states);
-            for (int j = 0; j < 8; ++j) {
-                KeccakP1600times8_ExtractBytes(&states, j,
-                                               output + (i+j)*digest,
-                                               0, digest);
+            const uint64_t *lanes0 = (const uint64_t *)buf0;
+            const uint64_t *lanes1 = (const uint64_t *)buf1;
+            const uint64_t *lanes2 = (const uint64_t *)buf2;
+            const uint64_t *lanes3 = (const uint64_t *)buf3;
+            const uint64_t *lanes4 = (const uint64_t *)buf4;
+            const uint64_t *lanes5 = (const uint64_t *)buf5;
+            const uint64_t *lanes6 = (const uint64_t *)buf6;
+            const uint64_t *lanes7 = (const uint64_t *)buf7;
+            for (int k = 0; k < (int)(BS / 8); ++k) {
+                s0[k] = lanes0[k]; s1[k] = lanes1[k]; s2[k] = lanes2[k]; s3[k] = lanes3[k];
+                s4[k] = lanes4[k]; s5[k] = lanes5[k]; s6[k] = lanes6[k]; s7[k] = lanes7[k];
+            }
+            extern void keccak_permutation8_avx512(uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *, uint64_t *);
+            keccak_permutation8_avx512(s0, s1, s2, s3, s4, s5, s6, s7);
+            uint8_t *dst = output + i * digest;
+            uint64_t *out0 = (uint64_t *)(dst + 0 * digest);
+            uint64_t *out1 = (uint64_t *)(dst + 1 * digest);
+            uint64_t *out2 = (uint64_t *)(dst + 2 * digest);
+            uint64_t *out3 = (uint64_t *)(dst + 3 * digest);
+            uint64_t *out4 = (uint64_t *)(dst + 4 * digest);
+            uint64_t *out5 = (uint64_t *)(dst + 5 * digest);
+            uint64_t *out6 = (uint64_t *)(dst + 6 * digest);
+            uint64_t *out7 = (uint64_t *)(dst + 7 * digest);
+            for (int k = 0; k < (int)(digest / 8); ++k) {
+                out0[k] = s0[k]; out1[k] = s1[k]; out2[k] = s2[k]; out3[k] = s3[k];
+                out4[k] = s4[k]; out5[k] = s5[k]; out6[k] = s6[k]; out7[k] = s7[k];
             }
             i += 8;
         }
-        /* leftover */
         for (; i < end; ++i) {
-            const void *msg = data + i*len;
-            void *dig = output + i*digest;
-            /* dispatch single-state AVX-512 or AVX2 or generic */
+            const void *msg = data + i * len;
+            void *dig = output + i * digest;
             sha3_hash(a->type, msg, len, dig, digest);
         }
         return NULL;
-#endif
     }
+#endif
     /* Fast multi-buffer 4-way path for 64-byte messages with AVX2 */
     if (have_avx2 && (a->type == SHA3_256 || a->type == SHA3_512) && len == 64) {
 #ifdef __GNUC__

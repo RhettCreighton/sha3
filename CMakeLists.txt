@@ -7,26 +7,16 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
-# Include directories
-# (project include + third-party Keccak headers)
+# Include project headers
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512/u12
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KeccakCodePackage/lib/low/KeccakP-1600/AVX512/C
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KeccakCodePackage/lib/low/KeccakP-1600/AVX512/C/u12
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KeccakCodePackage/lib/common
 )
 
 # Library source files
 set(SHA3_SOURCES
     src/sha3.c
     src/sha3_avx2.c
-    src/sha3_avx512_single.c
     src/sha3_parallel.c
-    third_party/KeccakCodePackage/lib/low/KeccakP-1600/AVX512/C/KeccakP-1600-AVX512.c
-    src/sha3_avx512_times8.c
-    third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512/KeccakP-1600-times8-SIMD512.c
     src/keccak.c
     src/keccak_avx2.c
     src/keccak_avx512.c
@@ -38,15 +28,7 @@ set(SHA3_SOURCES
 add_library(sha3 ${SHA3_SOURCES})
 ## Link threads for parallel hashing
 target_link_libraries(sha3 PUBLIC Threads::Threads)
-  # Suppress GCC unused-variable errors in third-party Keccak code
-  set_source_files_properties(
-    third_party/KeccakCodePackage/lib/low/KeccakP-1600-times8/AVX512/KeccakP-1600-times8-SIMD512.c
-    PROPERTIES COMPILE_FLAGS "-Wno-error=unused-variable"
-  )
-  set_source_files_properties(
-    third_party/KeccakCodePackage/lib/low/KeccakP-1600/AVX512/C/KeccakP-1600-AVX512.c
-    PROPERTIES COMPILE_FLAGS "-Wno-error=unused-variable"
-  )
+  # Note: AVX-512 KeccakP third-party sources have been removed
 
 # Set warning levels
 # Set warning levels
