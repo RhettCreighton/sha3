@@ -2,6 +2,24 @@
 
 This library provides a parallel, SIMD-accelerated implementation of SHA3-256 optimized for fixed-size messages.
 
+## XKCP AVX-512 Submodule
+
+This library integrates the 8×-lane AVX-512 Keccak-f[1600] kernel from the XKCP project.
+The sources are provided as the `vendor/XKCP` Git submodule. To initialize and update it:
+
+```bash
+git submodule update --init --recursive
+```
+
+Verify that the directory
+`vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512/`
+contains the files:
+- `KeccakP-1600-times8-SIMD512.c`
+- `KeccakP-1600-times8-SnP.h`
+
+CMake will automatically include the common headers from
+`vendor/XKCP/lib/common` and compile the AVX-512 kernel.
+
 ## Build
 
 ```bash

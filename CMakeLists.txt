@@ -29,20 +29,28 @@ set(SHA3_SOURCES
 add_library(sha3 ${SHA3_SOURCES})
 ## Link threads for parallel hashing
 target_link_libraries(sha3 PUBLIC Threads::Threads)
-  # Optional: integrate XKCP KeccakP-1600-times8 AVX512 full-unroll kernel
+  # Optional: integrate XKCP KeccakP-1600-times8 AVX512 full-unroll kernel if available
   set(XKCP_TIMES8_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512)
+  if(EXISTS "${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c")
+    target_include_directories(sha3 PRIVATE
+        ${XKCP_TIMES8_DIR}/ua
+        ${XKCP_TIMES8_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/common
+    )
+    target_sources(sha3 PRIVATE
+        ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
+    )
+    # Disable -Werror for unused-variable in XKCP code
+    set_source_files_properties(
+        ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
+        PROPERTIES COMPILE_FLAGS "-Wno-error=unused-variable"
+    )
+  else()
+    message(STATUS "Optional XKCP AVX512 kernel not found at ${XKCP_TIMES8_DIR}, skipping integration")
+  endif()
+  # Always add stub include path for common XKCP headers (e.g., KeccakP-1600-times8-SnP.h)
   target_include_directories(sha3 PRIVATE
-      ${XKCP_TIMES8_DIR}/ua
-      ${XKCP_TIMES8_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/common
-  )
-  target_sources(sha3 PRIVATE
-      ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
-  )
-  # Disable -Werror for unused-variable in XKCP code
-  set_source_files_properties(
-      ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
-      PROPERTIES COMPILE_FLAGS "-Wno-error=unused-variable"
   )
   # Note: AVX-512 KeccakP third-party sources have been removed
 

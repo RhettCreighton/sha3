@@ -62,33 +62,45 @@ static void *sha3_parallel_thread(void *arg) {
     /* CPU feature flags (inherited from parent) */
     int have_avx512 = a->have_avx512;
     int have_avx2   = a->have_avx2;
-    /* Pre-padded 8-way AVX-512 path: use XKCP full-unroll kernel */
+    /* 8-way AVX-512 path for pre-padded blocks (len == block size) */
     if (have_avx512 && (a->type == SHA3_256 || a->type == SHA3_512) &&
         ((len == SHA3_256_BLOCK_SIZE && a->type == SHA3_256) ||
          (len == SHA3_512_BLOCK_SIZE && a->type == SHA3_512))) {
-        size_t BS = (a->type == SHA3_256 ? SHA3_256_BLOCK_SIZE : SHA3_512_BLOCK_SIZE);
+        size_t BS = len;
         size_t DIG = digest;
         size_t i = start;
         while (i + 8 <= end) {
             if (i + PF_DIST < end) __builtin_prefetch(data + (i + PF_DIST) * BS, 0, 3);
-            KeccakP1600times8_SIMD512_states st;
-            for (unsigned lane = 0; lane < 8; ++lane) {
-                KeccakP1600times8_OverwriteBytes(&st, lane,
-                    data + (i + lane) * BS, 0, BS);
+            uint64_t s0[25] = {0}, s1[25] = {0}, s2[25] = {0}, s3[25] = {0};
+            uint64_t s4[25] = {0}, s5[25] = {0}, s6[25] = {0}, s7[25] = {0};
+            const uint8_t *base = data + i * BS;
+            size_t lanes_per_state = BS / 8;
+            for (size_t k = 0; k < lanes_per_state; ++k) {
+                s0[k] = ((const uint64_t*)(base + 0*BS))[k];
+                s1[k] = ((const uint64_t*)(base + 1*BS))[k];
+                s2[k] = ((const uint64_t*)(base + 2*BS))[k];
+                s3[k] = ((const uint64_t*)(base + 3*BS))[k];
+                s4[k] = ((const uint64_t*)(base + 4*BS))[k];
+                s5[k] = ((const uint64_t*)(base + 5*BS))[k];
+                s6[k] = ((const uint64_t*)(base + 6*BS))[k];
+                s7[k] = ((const uint64_t*)(base + 7*BS))[k];
             }
-            KeccakP1600times8_PermuteAll_24rounds(&st);
-            for (unsigned lane = 0; lane < 8; ++lane) {
-                KeccakP1600times8_ExtractBytes(&st, lane,
-                    output + (i + lane) * DIG, 0, DIG);
+            keccak_permutation8_avx512(s0, s1, s2, s3, s4, s5, s6, s7);
+            for (int lane = 0; lane < 8; ++lane) {
+                uint64_t *state = (lane == 0 ? s0 : lane == 1 ? s1 : lane == 2 ? s2 : lane == 3 ? s3 :
+                                  lane == 4 ? s4 : lane == 5 ? s5 : lane == 6 ? s6 : s7);
+                uint8_t *dst = output + (i + lane) * DIG;
+                for (size_t k = 0; k < DIG / 8; ++k) {
+                    ((uint64_t*)dst)[k] = state[k];
+                }
             }
             i += 8;
         }
-        /* Leftover messages fall back to scalar sponge */
+        /* leftovers */
         for (; i < end; ++i) {
-            uint64_t st[25];
-            keccak_init(st);
-            keccak_absorb(st, data + i * BS, BS, BS);
-            keccak_squeeze(st, output + i * DIG, DIG, BS);
+            const void *msg = data + i * BS;
+            void *digp = output + i * DIG;
+            sha3_hash(a->type, msg, BS, digp, DIG);
         }
         return NULL;
     }
@@ -105,9 +117,7 @@ static void *sha3_parallel_thread(void *arg) {
                     const uint8_t *src = data + (i + lane) * len;
                     KeccakP1600times8_OverwriteBytes(&st, lane, src, 0, (unsigned)len);
                     KeccakP1600times8_OverwriteBytes(&st, lane, (const unsigned char[]){0x06}, (unsigned)len, 1);
-                    /* zero padding between suffix and final bit */
                     KeccakP1600times8_OverwriteWithZeroes(&st, lane, (unsigned)(len + 1));
-                    /* domain bit */
                     KeccakP1600times8_OverwriteBytes(&st, lane, (const unsigned char[]){0x80}, (unsigned)(BS - 1), 1);
                 }
                 KeccakP1600times8_PermuteAll_24rounds(&st);
@@ -119,8 +129,8 @@ static void *sha3_parallel_thread(void *arg) {
             }
             for (; i < end; ++i) {
                 const uint8_t *src = data + i * len;
-                uint8_t *dst = output + i * digest;
-                sha3_hash(a->type, src, len, dst, digest);
+                uint8_t *dst = output + i * DIG;
+                sha3_hash(a->type, src, len, dst, DIG);
             }
             return NULL;
         }

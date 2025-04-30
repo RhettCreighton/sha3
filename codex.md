@@ -2,6 +2,22 @@
 
 This guide focuses on building and using the SHA3 library for maximum parallel throughput on fixed-size messages.
 
+## XKCP AVX-512 Kernel Submodule
+
+This guide assumes the 8×-lane AVX-512 Keccak-f[1600] implementation from the XKCP project
+is available under `vendor/XKCP`. Initialize and update the submodule with:
+
+```bash
+git submodule update --init --recursive
+```
+
+Ensure that `vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512/` contains:
+- `KeccakP-1600-times8-SIMD512.c`
+- `KeccakP-1600-times8-SnP.h`
+
+CMake will pull in the common SKCP headers from `vendor/XKCP/lib/common` and
+build the AVX-512 kernel automatically.
+
 ## Build
 
 ```bash
