@@ -48,9 +48,11 @@ int main(int argc, char *argv[]) {
     }
     struct timespec t0, t1;
     clock_gettime(CLOCK_MONOTONIC, &t0);
-    /* Parallel hash of n messages of equal length len */
-    if (sha3_hash_parallel_eqlen(SHA3_256, in, len, out, n) != 0) {
-        fprintf(stderr, "sha3_hash_parallel_eqlen failed\n");
+    /* Parallel hash of n messages of length len (padding done internally) */
+    if (sha3_hash_parallel_len(SHA3_256, in, len, out, n) != 0) {
+        fprintf(stderr, "sha3_hash_parallel_len failed\n");
+        free(in);
+        free(out);
         return 1;
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);

@@ -256,19 +256,23 @@ int sha3_hash_parallel_len(sha3_hash_type type,
     if (n == 0) return 0;
     size_t digest_size = sha3_get_digest_size(type);
     if (digest_size == 0) return -1;
-    /* Confirm len matches block size for vector kernels */
+    /* Confirm len is not above block size */
     size_t BS = sha3_get_block_size(type);
-    if (len != BS) return -1;
+    if (BS == 0 || len > BS) return -1;
     /* Detect CPU features once */
     int have_avx512 = 0, have_avx2 = 0;
-    #ifdef __GNUC__
-        have_avx512 = __builtin_cpu_supports("avx512f");
-        have_avx2   = __builtin_cpu_supports("avx2");
-    #endif
+#ifdef __GNUC__
+    have_avx512 = __builtin_cpu_supports("avx512f");
+    have_avx2   = __builtin_cpu_supports("avx2");
+#endif
     /* Determine number of threads */
     long nproc = sysconf(_SC_NPROCESSORS_ONLN);
     int nthreads = (nproc > 0 ? (int)nproc : 1);
     if ((size_t)nthreads > n) nthreads = (int)n;
+
+    /* No separate padding: sha3_parallel_thread handles padding per-message */
+    const uint8_t *data_ptr = (const uint8_t *)data;
+    size_t len_for_thread = len;
 
     pthread_t *threads = malloc(sizeof(pthread_t) * nthreads);
     if (!threads) return -1;
@@ -284,38 +288,30 @@ int sha3_hash_parallel_len(sha3_hash_type type,
     size_t offset = 0;
     for (int t = 0; t < nthreads; ++t) {
         size_t count = base + (t < (int)rem ? 1 : 0);
-        args[t].type = type;
-        /* propagate CPU feature flags into thread args */
+        args[t].type        = type;
         args[t].have_avx512 = have_avx512;
         args[t].have_avx2   = have_avx2;
-        args[t].data = (const uint8_t *)data;
-        args[t].output = (uint8_t *)output;
-        args[t].len = len;
+        args[t].data        = data_ptr;
+        args[t].output      = (uint8_t *)output;
+        args[t].len         = len_for_thread;
         args[t].digest_size = digest_size;
-        args[t].start = offset;
-        /* propagate CPU feature flags into thread args */
-        args[t].have_avx512 = have_avx512;
-        args[t].have_avx2   = have_avx2;
-        args[t].end = offset + count;
+        args[t].start       = offset;
+        args[t].end         = offset + count;
         offset += count;
-        {
-            pthread_attr_t attr;
-            cpu_set_t cpuset;
-            pthread_attr_init(&attr);
-            CPU_ZERO(&cpuset);
-            /* pin thread t to core t */
-            CPU_SET(t, &cpuset);
-            pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
-            if (pthread_create(&threads[t], &attr, sha3_parallel_thread, &args[t]) != 0) {
-                pthread_attr_destroy(&attr);
-                /* Cleanup on failure */
-                for (int j = 0; j < t; ++j) pthread_join(threads[j], NULL);
-                free(args);
-                free(threads);
-                return -1;
-            }
+        pthread_attr_t attr;
+        cpu_set_t cpuset;
+        pthread_attr_init(&attr);
+        CPU_ZERO(&cpuset);
+        CPU_SET(t, &cpuset);
+        pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+        if (pthread_create(&threads[t], &attr, sha3_parallel_thread, &args[t]) != 0) {
             pthread_attr_destroy(&attr);
+            for (int j = 0; j < t; ++j) pthread_join(threads[j], NULL);
+            free(args);
+            free(threads);
+            return -1;
         }
+        pthread_attr_destroy(&attr);
     }
 
     /* Join threads */
