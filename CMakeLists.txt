@@ -130,32 +130,20 @@ if(SHA3_BUILD_TESTS)
 endif()
 
 # Optional: examples
+# Optional: examples
 if(SHA3_BUILD_EXAMPLES)
-    # Simple hash example (SHA3-256)
-    add_executable(sha3_hash_example examples/hash_example.c)
-    target_link_libraries(sha3_hash_example sha3)
-
-    # SHAKE example (SHAKE128)
-    add_executable(sha3_shake_example examples/shake_example.c)
-    target_link_libraries(sha3_shake_example sha3)
-
-    # (Single-threaded sha3_benchmark example disabled due to missing AVX-512 single-lane kernels)
-#   add_executable(sha3_benchmark examples/sha3_benchmark.c)
-#   target_link_libraries(sha3_benchmark PRIVATE sha3 Threads::Threads)
-#   target_compile_options(sha3_benchmark PRIVATE -O3 -march=native -funroll-loops)
-    
     # Parallel benchmark: measure throughput of sha3_hash_parallel across threads
     add_executable(sha3_parallel_benchmark examples/sha3_parallel_benchmark.c)
     target_link_libraries(sha3_parallel_benchmark PRIVATE sha3 Threads::Threads)
     target_compile_options(sha3_parallel_benchmark PRIVATE -Ofast -march=native -funroll-loops -fomit-frame-pointer)
 
     set_target_properties(
-        sha3_hash_example sha3_shake_example sha3_parallel_benchmark
+        sha3_parallel_benchmark
         PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
     )
-    # Enable link-time optimization for examples
+    # Enable link-time optimization for example
     set_target_properties(
-        sha3_hash_example sha3_shake_example sha3_parallel_benchmark
+        sha3_parallel_benchmark
         PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON
     )
 endif()
