@@ -40,10 +40,34 @@ Measure pad-and-hash throughput for 1 000 000 messages of 64 bytes:
 ```bash
 build/bin/sha3_parallel_benchmark 1000000 64
 ```
-Example output:
+Example output on AVX2/AVX-512 hardware:
 ```
 sha3_hash_parallel_len: 1000000 messages of 64 bytes in 0.009 s
-Throughput: 113391284 msgs/s (6920.9 MiB/s) on 16 threads
+Throughput: 113e6 msgs/s (6.9 GiB/s) on 16 threads
+```
+
+## All-in-One Build & Benchmark Script
+
+For an end-to-end build, self-test, and performance run (parallel hashing and Merkle-tree build), use the included `bench.sh` script:
+
+```bash
+chmod +x bench.sh
+./bench.sh [PAR_BENCH_COUNT] [MERKLE_BENCH_LEAVES]
+```
+
+- `PAR_BENCH_COUNT` (default: 10000000) – number of 64-byte messages to hash in parallel
+- `MERKLE_BENCH_LEAVES` (default: 10000000) – number of 32-byte leaves in the 4-ary Merkle tree
+
+Example run on a 16-core AVX-512 machine:
+```
+=== SHA3 Parallel Benchmark ===
+sha3_hash_parallel_len: 10000000 messages of 64 bytes in 0.126 s
+Throughput: 79e6 msgs/s (4.8 GiB/s) on 16 threads
+
+=== Merkle Tree Benchmark ===
+Building 4-ary Merkle tree with 10000000 leaves...
+Built in 0.194 s -> 52 M hashes/s
+All done.
 ```
 
 ## License
