@@ -33,6 +33,7 @@ target_link_libraries(sha3 PUBLIC Threads::Threads)
   # Optional: integrate XKCP KeccakP-1600-times8 AVX512 full-unroll kernel if available
   set(XKCP_TIMES8_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512)
   if(EXISTS "${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c")
+    message(STATUS "Integrating XKCP AVX512 kernel from ${XKCP_TIMES8_DIR}")
     target_include_directories(sha3 PRIVATE
         ${XKCP_TIMES8_DIR}/ua
         ${XKCP_TIMES8_DIR}
