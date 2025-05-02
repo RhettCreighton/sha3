@@ -239,7 +239,6 @@ int sha3_hash_parallel_eqlen(sha3_hash_type type,
  * @param root       Output buffer (32 bytes) to receive the Merkle root
  * @return 0 on success, -1 on error
  */
-#define SHA3_MERKLE_TREE4_LEAF_SIZE SHA3_256_DIGEST_SIZE
 int sha3_merkle_tree4_32(const uint8_t *leaves, size_t num_leaves, uint8_t *root);
 /**
  * @brief Parallel hash of equal-length messages with auto-padding.

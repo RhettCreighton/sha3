@@ -23,36 +23,29 @@ int main(int argc, char **argv) {
     if (argc > 1) num_leaves = strtoull(argv[1], NULL, 0);
     printf("Building 4-ary Merkle tree with %zu leaves...\n", num_leaves);
 
-    size_t digest_size = SHA3_256_DIGEST_SIZE;
+    /* Allocate and fill leaves */
+    size_t leaf_size = SHA3_256_DIGEST_SIZE;
     uint8_t *leaves;
-    if (posix_memalign((void**)&leaves, 64, num_leaves * digest_size) != 0) {
+    if (posix_memalign((void**)&leaves, 64, num_leaves * leaf_size) != 0) {
         perror("posix_memalign");
         return 1;
     }
-    /* Fill leaves with pseudo-random data */
     {
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
         uint64_t seed = ((uint64_t)ts.tv_sec << 32) ^ ts.tv_nsec ^ (uint64_t)getpid();
         uint64_t *p = (uint64_t*)leaves;
-        size_t words = num_leaves * (digest_size / sizeof(uint64_t));
-        for (size_t i = 0; i < words; i++) {
+        size_t count = num_leaves * (leaf_size / sizeof(uint64_t));
+        for (size_t i = 0; i < count; i++) {
             seed = seed * 6364136223846793005ULL + 1;
             p[i] = seed;
         }
     }
-
-    uint8_t *root = malloc(digest_size);
-    if (!root) {
-        perror("malloc");
-        free(leaves);
-        return 1;
-    }
+    uint8_t root[leaf_size];
     double t0 = now_sec();
     if (sha3_merkle_tree4_32(leaves, num_leaves, root) != 0) {
         fprintf(stderr, "sha3_merkle_tree4_32 failed\n");
         free(leaves);
-        free(root);
         return 1;
     }
     double t1 = now_sec();
@@ -61,10 +54,9 @@ int main(int argc, char **argv) {
     double mhs = (num_leaves - 1) / (elapsed * 1e6);
     printf("Built in %.6f s -> %.2f M hashes/s\n", elapsed, mhs);
     printf("Root: ");
-    for (size_t i = 0; i < digest_size; i++) printf("%02x", root[i]);
+    for (size_t i = 0; i < leaf_size; i++) printf("%02x", root[i]);
     printf("\n");
 
     free(leaves);
-    free(root);
     return 0;
 }

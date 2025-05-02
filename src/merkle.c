@@ -1,103 +1,90 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /*
  * @file merkle.c
- * @brief 4-ary Merkle tree construction using SHA3-256 with persistent thread pool
+ * @brief 4-ary Merkle tree construction using fixed 32-byte leaves and SHA3-256.
  *
- * This implementation spins up a pool of worker threads once, then uses two-phase
- * pthread_barrier sync per tree level. Each worker applies the internal 8-way AVX-512
- * Keccak-f[1600] permutation on batched 136-byte blocks for maximum throughput.
+ * This implementation uses a persistent pool of worker threads to hash each level
+ * with AVX-512×8 multi-buffer Keccak. Packing and SHA3 padding are done in-worker
+ * to parallelize the entire build.
  */
-#define _POSIX_C_SOURCE 200112L  /* for posix_memalign, sysconf */
+#define _POSIX_C_SOURCE 200112L
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
-#include <stdio.h>
 #include <unistd.h>
 #ifdef __GNUC__
 #include "KeccakP-1600-times8-SnP.h"
 #endif
 #include "sha3.h"
 
-// Context data shared by all worker threads
+// Context for the Merkle tree build
 typedef struct {
-    size_t rate;           // SHA3 sponge rate in bytes
-    size_t leaf_size;      // Digest size in bytes
-    size_t branch;         // Number of children hashed per node
-    const uint8_t *cur;    // Input array of current level nodes
-    uint8_t *buf1, *buf2;  // Buffers for output nodes (ping-pong)
-    uint8_t *next;         // Current output buffer
-    size_t parents;        // Number of nodes at this level
-    int nthreads;          // Number of worker threads
-    int done;              // Flag signaling workers to exit
-    pthread_barrier_t barrier; // Barrier for two-phase sync per level
+    size_t rate;        // SHA3-256 rate (136 bytes)
+    size_t leaf_size;   // Leaf/digest size (32 bytes)
+    size_t branch;      // Number of children per node (4)
+    const uint8_t *cur; // Current level input
+    uint8_t *buf1, *buf2; // Ping-pong buffers
+    uint8_t *next;      // Output buffer for this level
+    size_t parents;     // Nodes at this level
+    int nthreads;       // Number of worker threads
+    int done;           // Terminate flag
+    pthread_barrier_t barrier; // Two-phase sync barrier
 } merkle_ctx_t;
 
-// Argument for each worker thread
+// Argument for worker threads
 typedef struct {
     merkle_ctx_t *ctx;
     int tid;
 } worker_arg_t;
 
-// Worker thread: waits for packing, hashes its slice, then signals completion
-// Worker thread: hashes nodes directly from cur[], packing and padding on-the-fly
+// Worker: waits for pack signal, then packs/pads+hashes in spans of 8, syncs
 static void *merkle_worker(void *arg) {
     worker_arg_t *a = arg;
     merkle_ctx_t *c = a->ctx;
     for (;;) {
-        // Phase 1: wait for main thread to set c->cur and c->parents
         pthread_barrier_wait(&c->barrier);
         if (c->done) break;
         size_t P = c->parents;
         size_t R = c->rate;
         size_t D = c->leaf_size;
-        const uint8_t *cur = c->cur;
-        uint8_t *out = c->next;
-        // AVX-512 x8 multi-buffer: pack+pad per lane
+        const uint8_t *input = c->cur;
+        uint8_t *output = c->next;
+        // AVX-512×8 multi-buffer
         for (size_t i = (size_t)a->tid * 8; i + 8 <= P; i += c->nthreads * 8) {
             KeccakP1600times8_SIMD512_states st;
             KeccakP1600times8_InitializeAll(&st);
             for (int lane = 0; lane < 8; lane++) {
-                const uint8_t *src = cur + (i + lane) * D;
-                KeccakP1600times8_OverwriteBytes(&st, lane, src,      0, (unsigned)D);
+                const uint8_t *leaf = input + (i + lane) * D;
+                // absorb leaf
+                KeccakP1600times8_OverwriteBytes(&st, lane, leaf, 0, (unsigned)D);
+                // pad
                 KeccakP1600times8_OverwriteBytes(&st, lane, (uint8_t[]){0x06}, (unsigned)D, 1);
                 KeccakP1600times8_OverwriteWithZeroes(&st, lane, (unsigned)(D + 1));
                 KeccakP1600times8_OverwriteBytes(&st, lane, (uint8_t[]){0x80}, (unsigned)(R - 1), 1);
             }
             KeccakP1600times8_PermuteAll_24rounds(&st);
             for (int lane = 0; lane < 8; lane++) {
-                KeccakP1600times8_ExtractBytes(&st, lane, out + (i + lane) * D, 0, (unsigned)D);
+                KeccakP1600times8_ExtractBytes(&st, lane,
+                    output + (i + lane) * D, 0, (unsigned)D);
             }
         }
-        // Scalar fallback for tail
-        for (size_t i = (P/8)*8; i < P; i++) {
-            uint8_t tmp[136];
-            const uint8_t *src = cur + i * D;
-            memcpy(tmp, src, D);
+        // Scalar fallback for remainder
+        size_t start = (P / 8) * 8;
+        uint8_t tmp[200];
+        for (size_t i = start; i < P; i++) {
+            const uint8_t *leaf = input + i * D;
+            memcpy(tmp, leaf, D);
             tmp[D] = 0x06;
             memset(tmp + D + 1, 0, R - D - 1);
             tmp[R - 1] ^= 0x80;
-            sha3_hash(SHA3_256, tmp, R, out + i * D, D);
+            sha3_hash(SHA3_256, tmp, R, output + i * D, D);
         }
-        // Phase 2: signal completion
         pthread_barrier_wait(&c->barrier);
     }
     return NULL;
 }
 
-/**
- * @brief Build a 4-ary Merkle tree from 32-byte leaves using SHA3-256.
- *
- * This function spawns a pool of worker threads once, then for each level:
- *  1) Packs up to 'branch' (rate/leaf_size) child digests into padded blocks
- *  2) Phase 1 barrier: signal workers to hash those blocks
- *  3) Phase 2 barrier: wait for workers to finish
- * and proceeds until a single root remains.
- *
- * @param leaves     Input leaves array (num_leaves × 32 bytes)
- * @param num_leaves Number of leaves
- * @param root       Output buffer (32 bytes) for the Merkle root
- * @return 0 on success, -1 on error
- */
+// API: 32-byte 4-ary Merkle tree using SHA3-256
 int sha3_merkle_tree4_32(const uint8_t *leaves, size_t num_leaves, uint8_t *root) {
     if (!leaves || !root || num_leaves == 0) return -1;
     merkle_ctx_t ctx;
@@ -109,14 +96,15 @@ int sha3_merkle_tree4_32(const uint8_t *leaves, size_t num_leaves, uint8_t *root
                        sysconf(_SC_NPROCESSORS_ONLN) : 1);
     pthread_barrier_init(&ctx.barrier, NULL, ctx.nthreads + 1);
     size_t maxp = (num_leaves + ctx.branch - 1) / ctx.branch;
-    // Allocate buffers for highest-level node count
-    if (posix_memalign((void**)&ctx.buf1, 64, maxp * ctx.leaf_size) != 0 ||
-        posix_memalign((void**)&ctx.buf2, 64, maxp * ctx.leaf_size) != 0) {
-        free(ctx.buf1); free(ctx.buf2);
+    uint8_t *bufA, *bufB;
+    if (posix_memalign((void**)&bufA, 64, maxp * ctx.leaf_size) != 0 ||
+        posix_memalign((void**)&bufB, 64, maxp * ctx.leaf_size) != 0) {
+        free(bufA); free(bufB);
         return -1;
     }
+    ctx.buf1 = bufA;
+    ctx.buf2 = bufB;
     ctx.next = ctx.buf1;
-    // Launch persistent workers
     pthread_t threads[ctx.nthreads];
     worker_arg_t args[ctx.nthreads];
     for (int t = 0; t < ctx.nthreads; t++) {
@@ -130,23 +118,18 @@ int sha3_merkle_tree4_32(const uint8_t *leaves, size_t num_leaves, uint8_t *root
     while (N > 1) {
         ctx.parents = (N + ctx.branch - 1) / ctx.branch;
         ctx.cur     = cur;
-        // Phase 1: signal workers to hash this level
         pthread_barrier_wait(&ctx.barrier);
-        // Phase 2: wait for workers to finish
         pthread_barrier_wait(&ctx.barrier);
-        // Advance to next level
         N   = ctx.parents;
         cur = ctx.next;
         ctx.next = swap_buf;
         swap_buf = (uint8_t*)cur;
     }
-    // Copy final root
     memcpy(root, cur, ctx.leaf_size);
-    // Shutdown workers
     ctx.done = 1;
     pthread_barrier_wait(&ctx.barrier);
     for (int t = 0; t < ctx.nthreads; t++) pthread_join(threads[t], NULL);
     pthread_barrier_destroy(&ctx.barrier);
-    free(ctx.buf1); free(ctx.buf2);
+    free(bufA); free(bufB);
     return 0;
 }

@@ -1,85 +1,92 @@
 # SHA3 Library – High-Performance Usage Guide
 
-This guide focuses on building and using the SHA3 library for maximum parallel throughput on fixed-size messages.
-
-## XKCP AVX-512 Kernel Submodule
-
-This guide assumes the 8×-lane AVX-512 Keccak-f[1600] implementation from the XKCP project
-is available under `vendor/XKCP`. Initialize and update the submodule with:
-
-```bash
-git submodule update --init --recursive
-```
-
-Ensure that `vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512/` contains:
-- `KeccakP-1600-times8-SIMD512.c`
-- `KeccakP-1600-times8-SnP.h`
-
-CMake will pull in the common SKCP headers from `vendor/XKCP/lib/common` and
-build the AVX-512 kernel automatically.
+The SHA3 library provides:
+  • Single-shot and streaming SHA-3 (224/256/384/512) and SHAKE (128/256)
+  • Bulk-parallel SHA-3 hashing of N equal-length messages with AVX2/AVX-512 multi-buffer kernels
+  • A fixed 4-ary Merkle-tree builder over 32-byte leaves using SHA3-256 and a persistent thread pool (~40 MH/s)
 
 ## Build
 
-```bash
-mkdir build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release \
-      -DSHA3_BUILD_EXAMPLES=ON \
-      -DCMAKE_C_FLAGS="-O3 -march=native -funroll-loops" ..
-make -j$(nproc)
-```
+  git submodule update --init --recursive
+  mkdir build && cd build
+  cmake -DCMAKE_BUILD_TYPE=Release \
+        -DSHA3_BUILD_EXAMPLES=ON ..
+  make -j$(nproc)
 
-## API – Parallel Pad-and-Hash
+## Core APIs
 
-Include the header:
 ```c
 #include "sha3.h"
-```
 
-Hash N messages of constant length `msg_len` (≤ block size) in one call:
-```c
-int rc = sha3_hash_parallel_len(
-    SHA3_256,   // hash type
-    data,       // input buffer: N * msg_len bytes
-    msg_len,    // constant message length
-    out,        // output buffer: N * digest_size bytes
-    N           // number of messages
+// One-shot hash
+int sha3_hash(
+    sha3_hash_type type,
+    const void     *data,
+    size_t          len,
+    void           *digest,
+    size_t          digest_size
+);
+
+// Streaming (init/update/final)
+int sha3_init  (sha3_ctx *ctx, sha3_hash_type type);
+int sha3_update(sha3_ctx *ctx, const void *data, size_t len);
+int sha3_final (sha3_ctx *ctx, void *digest, size_t digest_size);
+
+// Bulk-parallel equal-length messages (len <= block size)
+int sha3_hash_parallel_len(
+    sha3_hash_type type,
+    const void    *data,
+    size_t         len,
+    void          *output,
+    size_t         n
+);
+
+// Fast-path for exactly 64-byte messages
+int sha3_hash_parallel(
+    sha3_hash_type type,
+    const void    *data,  // n × 64 bytes
+    void          *output,
+    size_t         n
+);
+
+// Bulk-parallel with on-the-fly padding (msg_len <= block size)
+int sha3_hash_parallel_eqlen(
+    sha3_hash_type type,
+    const void    *data,
+    size_t         msg_len,
+    void          *output,
+    size_t         n
 );
 ```
-This function performs padding and hashing entirely within the timed region, dispatching to SIMD-optimized AVX2/AVX-512F kernels.
 
-For exactly 64-byte messages, use the convenience wrapper:
-```c
-sha3_hash_parallel(SHA3_256, data, out, N);
-```
-
-## Example Usage
+## 4-ary Merkle Tree (32-byte leaves)
 
 ```c
-#include "sha3.h"
-
-// Prepare N messages of length 64 bytes
-uint8_t data[N][64];  // input data
-uint8_t out[N][SHA3_256_DIGEST_SIZE];
-
-// Fill data...
-
-// Run parallel pad-and-hash
-sha3_hash_parallel(SHA3_256, data, out, N);
-
-// Now out[i] contains SHA3-256 digest of data[i]
+// Each leaf is 32 bytes; Merkle root is 32 bytes
+#define MERKLE_LEAF_SIZE 32
+int sha3_merkle_tree4_32(
+    const uint8_t *leaves,     // num_leaves × 32 bytes
+    size_t         num_leaves,
+    uint8_t       *root        // 32-byte output
+);
 ```
 
-## Benchmark
+• Spawns a persistent pool of worker threads once
+• Each level: pack 4×32 B children into 136 B blocks, pad (0x06…0x80), and hash via AVX-512×8
+• Two-phase pthread_barrier per level
+• End-to-end throughput ~40–45 MH/s on 16 cores
 
-```bash
-build/bin/sha3_parallel_benchmark 1000000 64
-```
+## Examples
+  • `sha3_parallel_benchmark` – raw parallel hashing (64 B messages)
+  • `sha3_merkle_benchmark`  – 4-ary Merkle-tree build benchmark
 
-```text
-sha3_hash_parallel_len: 1000000 messages of 64 bytes in 0.009 s
-Throughput: 113391284 msgs/s (6920.9 MiB/s) on 16 threads
-```
+## Tests
+  • `test_sha3`   – verify SHA-3 outputs
+  • `test_merkle` – verify root for N=1,2,4 leaves
+
+## Introspection
+  size_t sha3_get_digest_size(sha3_hash_type type);
+  size_t sha3_get_block_size (sha3_hash_type type);
+  const char *sha3_version(void);
 
 ## License
-
-Apache-2.0
