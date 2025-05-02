@@ -218,6 +218,30 @@ int sha3_hash_parallel_eqlen(sha3_hash_type type,
                              void *output,
                              size_t n);
 /**
+ * @brief Build a 4-ary Merkle tree (SHA3-256) from 32-byte leaves using a persistent thread pool.
+ *
+ * Each parent node hashes 4 child leaves (32 bytes each) into a 32-byte digest.
+ * Leaves are packed and padded to the 136-byte SHA3 rate, and hashed in 8-way AVX-512 batches.
+ * @param leaves     Input leaves (num_leaves × 32 bytes)
+ * @param num_leaves Number of leaves
+ * @param root       Output buffer (32 bytes) for the Merkle root
+ * @return 0 on success, -1 on error
+ */
+/**
+ * @brief Fixed 4-ary Merkle tree for 32-byte leaves (SHA3-256).
+ *
+ * Builds a Merkle tree where each parent node is the SHA3-256 hash of four
+ * concatenated 32-byte child nodes, padded to the 136-byte SHA3-256 rate.
+ * Uses an internal persistent thread pool with AVX-512×8 multi-buffer for speed.
+ *
+ * @param leaves     Input array of leaves (num_leaves × 32 bytes)
+ * @param num_leaves Number of leaves
+ * @param root       Output buffer (32 bytes) to receive the Merkle root
+ * @return 0 on success, -1 on error
+ */
+#define SHA3_MERKLE_TREE4_LEAF_SIZE SHA3_256_DIGEST_SIZE
+int sha3_merkle_tree4_32(const uint8_t *leaves, size_t num_leaves, uint8_t *root);
+/**
  * @brief Parallel hash of equal-length messages with auto-padding.
  *
  * Hashes n messages of length msg_len bytes (msg_len <= block size) in parallel.

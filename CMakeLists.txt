@@ -22,6 +22,7 @@ set(SHA3_SOURCES
     src/keccak_avx512.c
     src/shake.c
     src/hash_function.c
+    src/merkle.c
 )
 ## Add XKCP KeccakP-1600-times8 AVX512 full-unroll kernel
 
@@ -144,6 +145,18 @@ if(SHA3_BUILD_EXAMPLES)
     # Enable link-time optimization for example
     set_target_properties(
         sha3_parallel_benchmark
+        PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON
+    )
+    # Merkle tree build benchmark example
+    add_executable(sha3_merkle_benchmark examples/sha3_merkle_benchmark.c)
+    target_link_libraries(sha3_merkle_benchmark PRIVATE sha3 Threads::Threads)
+    target_compile_options(sha3_merkle_benchmark PRIVATE -Ofast -march=native -funroll-loops -fomit-frame-pointer)
+    set_target_properties(
+        sha3_merkle_benchmark
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+    )
+    set_target_properties(
+        sha3_merkle_benchmark
         PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON
     )
 endif()
