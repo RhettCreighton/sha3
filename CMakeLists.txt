@@ -124,7 +124,7 @@ if(SHA3_BUILD_TESTS)
     
     # Add test executable
     add_executable(test_sha3 tests/test_sha3.c)
-    target_link_libraries(test_sha3 sha3)
+    target_link_libraries(test_sha3 PRIVATE sha3)
     set_target_properties(test_sha3 PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
     # Merkle tree tests
     add_executable(test_merkle tests/test_merkle.c)
