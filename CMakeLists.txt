@@ -1,3 +1,6 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) 2025 Rhett Creighton */
+
 cmake_minimum_required(VERSION 3.12)
 project(sha3 VERSION 1.0.0 LANGUAGES C)
 find_package(Threads REQUIRED)
