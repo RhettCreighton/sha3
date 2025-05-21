@@ -1,3 +1,6 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright (c) 2025 Rhett Creighton -->
+
 # SHA3 Library – High-Performance Parallel SHA3-256
 
 This library provides a parallel, SIMD-accelerated implementation of SHA3-256 optimized for fixed-size messages.
