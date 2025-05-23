@@ -75,9 +75,9 @@ target_compile_options(sha3 PRIVATE
 # Install headers
 install(FILES include/sha3.h DESTINATION include)
 
-# Install library
-## Enable link-time optimization if supported (LTO)
-set_target_properties(sha3 PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+## Install library
+## Disable link-time optimization (LTO) to avoid creating temp files in /tmp
+set_target_properties(sha3 PROPERTIES INTERPROCEDURAL_OPTIMIZATION OFF)
 
 install(TARGETS sha3
         EXPORT sha3Targets
