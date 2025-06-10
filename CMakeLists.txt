@@ -19,6 +19,7 @@ include_directories(
 set(SHA3_SOURCES
     src/sha3.c
     src/sha3_avx2.c
+    src/sha3_avx2_batch.c
     src/sha3_parallel.c
     src/keccak.c
     src/keccak_avx2.c
