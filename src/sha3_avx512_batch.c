@@ -12,6 +12,7 @@
 #include <immintrin.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 // Keccak round constants
 static const uint64_t RC[24] = {

@@ -3,7 +3,6 @@
 
 cmake_minimum_required(VERSION 3.12)
 project(sha3 VERSION 1.0.0 LANGUAGES C)
-find_package(Threads REQUIRED)
 
 # Set C standard
 set(CMAKE_C_STANDARD 99)
@@ -16,49 +15,20 @@ include_directories(
 )
 
 # Library source files
+# Core SHA3 implementation with AVX2 optimization
+# Note: Parallel/merkle files excluded - they require XKCP vendored code
 set(SHA3_SOURCES
     src/sha3.c
     src/sha3_avx2.c
-    src/sha3_avx2_batch.c
-    src/sha3_parallel.c
     src/keccak.c
     src/keccak_avx2.c
-    src/keccak_avx512.c
     src/shake.c
     src/hash_function.c
-    src/merkle.c
 )
 ## Add XKCP KeccakP-1600-times8 AVX512 full-unroll kernel
 
 ## Create library (static by default)
 add_library(sha3 ${SHA3_SOURCES})
-## Link threads for parallel hashing
-target_link_libraries(sha3 PUBLIC Threads::Threads)
-  # Optional: integrate XKCP KeccakP-1600-times8 AVX512 full-unroll kernel if available
-  set(XKCP_TIMES8_DIR ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/low/KeccakP-1600-times8/AVX512)
-  if(EXISTS "${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c")
-    message(STATUS "Integrating XKCP AVX512 kernel from ${XKCP_TIMES8_DIR}")
-    target_include_directories(sha3 PRIVATE
-        ${XKCP_TIMES8_DIR}/ua
-        ${XKCP_TIMES8_DIR}
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/common
-    )
-    target_sources(sha3 PRIVATE
-        ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
-    )
-    # Disable -Werror for unused-variable in XKCP code
-    set_source_files_properties(
-        ${XKCP_TIMES8_DIR}/KeccakP-1600-times8-SIMD512.c
-        PROPERTIES COMPILE_FLAGS "-Wno-error=unused-variable"
-    )
-  else()
-    message(STATUS "Optional XKCP AVX512 kernel not found at ${XKCP_TIMES8_DIR}, skipping integration")
-  endif()
-  # Always add stub include path for common XKCP headers (e.g., KeccakP-1600-times8-SnP.h)
-  target_include_directories(sha3 PRIVATE
-      ${CMAKE_CURRENT_SOURCE_DIR}/vendor/XKCP/lib/common
-  )
-  # Note: AVX-512 KeccakP third-party sources have been removed
 
 # Set warning levels
 # Set warning levels
